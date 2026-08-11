@@ -15,6 +15,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getHermesApiKey, getStartupNextBaseUrl } from "./config/env.js";
+import { ejecutarConsejosParaActividad, consejosParaActividadInputShape } from "./tools/consejosParaActividad.js";
 import { ejecutarSiguienteAccion, siguienteAccionInputShape } from "./tools/siguienteAccion.js";
 
 async function main() {
@@ -44,6 +45,24 @@ async function main() {
       },
     },
     async (args) => ejecutarSiguienteAccion(args)
+  );
+
+  server.registerTool(
+    "consejos_para_actividad",
+    {
+      description:
+        "Dada una actividad concreta -- recomendada por siguiente_accion, o elegida por el fundador aunque " +
+        "contradiga la metodología -- devuelve los mejores consejos disponibles para ejecutarla bien, según " +
+        "los especialistas de startup-next. Si se pasa actividad_recomendada y difiere de actividad, el " +
+        "consejo se modula conscientes de ese apartamiento.",
+      inputSchema: consejosParaActividadInputShape,
+      annotations: {
+        title: "Consejos para ejecutar una actividad",
+        readOnlyHint: true, // no escribe estado en ningún lado, ver Diseno_servidor_MCP_startup-next.md
+        openWorldHint: true, // llama a un servicio externo (startup-next) por HTTP
+      },
+    },
+    async (args) => ejecutarConsejosParaActividad(args)
   );
 
   const transport = new StdioServerTransport();

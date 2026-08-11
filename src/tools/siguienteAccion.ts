@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { createRun, getRun, parseInforme, startRun } from "../client/startupNextClient.js";
-import { isTerminalStatus, type RunState } from "../client/types.js";
-import { getPollIntervalMs, getPollTimeoutMs } from "../config/env.js";
+import { createRun, parseInforme, startRun } from "../client/startupNextClient.js";
+import type { RunState } from "../client/types.js";
+import { esperarResolucion, formatearSinRespuesta, textoResult } from "./runFlow.js";
 
 /**
  * Herramienta 1 de Diseno_servidor_MCP_startup-next.md — "siguiente_accion".
@@ -67,51 +67,6 @@ function componerTexto(situacion: string, contextoHistorico: string | undefined)
   ].join("\n");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Lleva el run desde el estado que devuelve startRun() hasta un estado
- * terminal, o hasta needs_clarification (que NO se responde automáticamente
- * -- ver nota en startupNextClient.ts: inventar una respuesta violaría el
- * principio de no fallar/asumir en silencio del proyecto. Se devuelve tal
- * cual para que quien llamó la herramienta MCP decida cómo re-preguntar).
- */
-async function esperarResolucion(initialState: RunState): Promise<RunState> {
-  let state = initialState;
-
-  if (state.status === "draft") {
-    throw new Error(
-      `Run ${state.run_id} sigue en "draft" tras llamar a startRun() -- respuesta inesperada del backend.`
-    );
-  }
-  if (state.status === "needs_clarification") return state;
-  if (isTerminalStatus(state.status)) return state;
-
-  const pollIntervalMs = getPollIntervalMs();
-  const pollTimeoutMs = getPollTimeoutMs();
-  const deadline = Date.now() + pollTimeoutMs;
-
-  while (state.status === "running") {
-    if (Date.now() > deadline) {
-      throw new Error(
-        `Run ${state.run_id}: se superó MCP_POLL_TIMEOUT_MS (${pollTimeoutMs}ms) esperando un estado terminal. ` +
-          `Último estado: cycle=${state.cycle}/${state.max_cycles}.`
-      );
-    }
-    await sleep(pollIntervalMs);
-    state = await getRun(state.run_id);
-    if (state.status === "needs_clarification") return state;
-  }
-
-  return state;
-}
-
-function textoResult(text: string): CallToolResult {
-  return { content: [{ type: "text", text }] };
-}
-
 function formatearAprobado(state: RunState): CallToolResult {
   const lineas = [`Siguiente actividad recomendada (especialista: ${state.especialista_usado ?? "desconocido"}):`, ""];
   const recomendaciones = state.informe_final?.recomendaciones ?? [];
@@ -130,20 +85,6 @@ function formatearNecesitaAclaracion(state: RunState): CallToolResult {
       `Pregunta de startup-next: ${state.pregunta ?? "(sin pregunta explícita)"}\n\n` +
       `Volvé a llamar a siguiente_accion con una "situacion" que ya incluya la respuesta a esta pregunta.`
   );
-}
-
-function formatearSinRespuesta(state: RunState): CallToolResult {
-  const nr = state.no_respuesta;
-  if (!nr) {
-    return textoResult(`No se llegó a una recomendación aprobada (status: ${state.status}).`);
-  }
-  const lineas = [
-    `No se llegó a una recomendación aprobada. Tipo: ${nr.tipo}.`,
-    `Motivo: ${nr.motivo_principal}`,
-    `Ciclos intentados: ${nr.ciclos_intentados}`,
-  ];
-  if (nr.especialista_faltante) lineas.push(`Especialista todavía no implementado: ${nr.especialista_faltante}.`);
-  return textoResult(lineas.join("\n"));
 }
 
 /**
